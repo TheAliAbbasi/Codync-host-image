@@ -75,6 +75,8 @@ Preinstalled (no lazy step): **Claude** (`ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUT
 
 Set `OPENCODE_VERSION` (default `1.18.35`) before the first OpenCode lazy install to pin the release tarball.
 
+To bake specific lazy agents into your own image (skip first-start downloads), see [examples/](examples/README.md).
+
 ### Inherited environment
 
 Codync starts each CLI as a child, so the container environment is visible. No config file is written for these:

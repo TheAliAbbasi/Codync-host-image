@@ -1,0 +1,47 @@
+# Example: bake selected lazy-install agents into a custom runtime image.
+# First start then skips npm/curl for tools that are already under /opt/codync-cli.
+#
+# Build:
+#   docker build -f examples/Dockerfile.preinstall-agents -t my-codync-host:runtime .
+#
+ARG RUNTIME_IMAGE=ghcr.io/thealiabbasi/codync-host:runtime
+FROM ${RUNTIME_IMAGE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+# Same build-time layout as Dockerfile.runtime (installers write under /opt/codync-cli).
+ENV HOME=/opt/codync-cli \
+    NPM_CONFIG_PREFIX=/opt/codync-cli/.npm \
+    PATH="/opt/codync-cli/.npm/bin:/opt/codync-cli/.local/bin:/opt/codync-cli/.opencode/bin:/usr/local/bin:/usr/share/dotnet:${PATH}"
+
+# Gemini CLI — same package as scripts/install-agent-on-demand.sh (_install_gemini).
+RUN npm install -g @google/gemini-cli \
+    && command -v gemini
+
+# OpenCode — tarball install from _install_opencode (no auth required at build time).
+ARG OPENCODE_VERSION=1.18.35
+RUN set -eu \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) oc_arch=x64 ;; \
+         arm64) oc_arch=arm64 ;; \
+         *) echo "unsupported architecture for opencode: $arch" >&2; exit 1 ;; \
+       esac \
+    && mkdir -p /opt/codync-cli/.opencode/bin \
+    && url="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${oc_arch}.tar.gz" \
+    && tmp="$(mktemp -d)" \
+    && curl -fsSL "$url" -o "${tmp}/opencode.tar.gz" \
+    && tar -xzf "${tmp}/opencode.tar.gz" -C "${tmp}" \
+    && install -m 0755 "${tmp}/opencode" /opt/codync-cli/.opencode/bin/opencode \
+    && rm -rf "${tmp}" \
+    && /opt/codync-cli/.opencode/bin/opencode --version
+
+RUN chmod -R a+rX /opt/codync-cli
+
+# Runtime identity matches the published :runtime image (volume-backed HOME).
+ENV HOME=/var/lib/codync-host \
+    PATH="/usr/local/bin:/opt/codync-cli/.local/bin:/opt/codync-cli/bin:/opt/codync-cli/.npm/bin:/opt/codync-cli/.opencode/bin:/usr/share/dotnet:${PATH}"
+
+USER codync
