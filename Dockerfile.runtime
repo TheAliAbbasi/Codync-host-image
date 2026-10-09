@@ -35,6 +35,7 @@ RUN apt-get update \
         make \
         g++ \
         libicu74 \
+        unzip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/codync-cli /usr/share/dotnet \
     && chown -R codync:codync /var/lib/codync-host
