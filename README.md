@@ -10,7 +10,7 @@ Images:
 | --- | --- |
 | `ghcr.io/thealiabbasi/codync-host:vX.Y.Z` | One upstream Linux host archive, both `linux/amd64` and `linux/arm64`. Historical tags stay on that version. |
 | `ghcr.io/thealiabbasi/codync-host:latest` | The highest published `vX.Y.Z`. A backfill does not move this backward. |
-| `ghcr.io/thealiabbasi/codync-host:runtime` | The image to run. Built `FROM` `:latest`, with agent CLIs, connector runtimes, and an entrypoint. Rebuilt when that host tag is current, not once per old release. |
+| `ghcr.io/thealiabbasi/codync-host:runtime` | The image to run. Built `FROM` `:latest`, with connector runtimes, an entrypoint, **four preinstalled agent CLIs** (Claude, Cursor, Codex, Grok), and on-demand installs for the rest when you set the matching secrets. Rebuilt when that host tag is current, not once per old release. |
 
 `v1.0.0`–`v1.0.5` are not published. Those releases only contain macOS app archives. Desktop archives (`codync-linux-*.tar.gz`, AppImage, `.deb`) are never used.
 
@@ -40,6 +40,40 @@ Add `-p 19222:19222` only on a trusted private network (for example local debugg
 `HOME` is `/var/lib/codync-host`. That directory is the volume, and Codync stores `~/.codync` inside it. The keyring and CLI config files live there too, so they survive a new container.
 
 An unset variable leaves that agent unconfigured. The entrypoint does not open a browser and does not start a device-code login. Google Antigravity is not installed.
+
+### Slim runtime and lazy agent installs
+
+The `:runtime` image ships **Claude Code**, **Cursor Agent**, **Codex**, and **Grok (xAI)** only. Every other supported CLI is downloaded on the **first container start** when the entrypoint sees the auth variables below and the binary is not already present (for example under `/opt/codync-cli` on the volume). Installs are idempotent: later restarts skip work when the tool is on `PATH`.
+
+That keeps the default image smaller. The tradeoff is **cold-start latency** and a need for **outbound network** on first use of each agent (npm, curl installers, GitHub release tarballs). Shared provider keys (for example `ANTHROPIC_API_KEY`) can trigger installs for every agent that documents that variable.
+
+| Agent | Lazy install when set (all required where listed) |
+| --- | --- |
+| Pi | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` |
+| Gemini | `GEMINI_API_KEY` |
+| Copilot | `COPILOT_GITHUB_TOKEN` or `GH_TOKEN` |
+| Factory Droid | `FACTORY_API_KEY` |
+| Qoder | `QODER_PERSONAL_ACCESS_TOKEN` |
+| CodeBuddy | `CODEBUDDY_API_KEY` |
+| Auggie | `AUGMENT_SESSION_AUTH` |
+| Cline | `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` |
+| Kilo | `KILO_API_KEY` |
+| Qwen Code | `DASHSCOPE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` |
+| Kimi | `KIMI_API_KEY` |
+| MiniMax (`mcode`) | `MCODE_PROVIDER_API_KEY` |
+| OpenCode | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY` |
+| goose | `GOOSE_PROVIDER`, or a provider key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` |
+| Amp | `AMP_API_KEY` |
+| Junie | `JUNIE_API_KEY` |
+| Poolside | `POOLSIDE_API_KEY` **and** `POOLSIDE_STANDALONE_BASE_URL` |
+| Mistral Vibe | `MISTRAL_API_KEY` |
+| Kiro | `KIRO_API_KEY` |
+| Devin | `WINDSURF_API_KEY` |
+| Cortex | `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_PASSWORD` |
+
+Preinstalled (no lazy step): **Claude** (`ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`), **Cursor** (`CURSOR_API_KEY`), **Codex** (`OPENAI_API_KEY` / `CODEX_ACCESS_TOKEN`), **Grok** (`XAI_API_KEY`).
+
+Set `OPENCODE_VERSION` (default `1.18.35`) before the first OpenCode lazy install to pin the release tarball.
 
 ### Inherited environment
 

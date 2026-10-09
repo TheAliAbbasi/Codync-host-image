@@ -1,6 +1,7 @@
 # Unofficial runtime image. Built FROM the highest published host tag.
-# Agent CLIs are installed here. The entrypoint configures one only when its
-# secret is set and its config is missing. Google Antigravity is omitted:
+# Claude, Cursor, Codex, and xAI (Grok) are installed here. Other agent CLIs are
+# fetched on first start when the entrypoint sees the matching auth env vars
+# (see scripts/install-agent-on-demand.sh). Google Antigravity is omitted:
 # Codync starts its ACP server, which has no documented non-browser init.
 ARG HOST_IMAGE=ghcr.io/thealiabbasi/codync-host:latest
 FROM ${HOST_IMAGE}
@@ -39,7 +40,7 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/codync-cli /usr/share/dotnet \
-    && chown -R codync:codync /var/lib/codync-host
+    && chown -R codync:codync /var/lib/codync-host /opt/codync-cli
 
 # Node.js and npx — https://github.com/nodesource/distributions
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -78,76 +79,15 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && command -v docker \
     && ! command -v dockerd
 
-# Pi — https://github.com/earendil-works/pi
-RUN npm install -g @earendil-works/pi-coding-agent
-# Grok — https://x.ai/docs (CLI package @xai-official/grok)
+# Grok (xAI) — https://x.ai/docs (CLI package @xai-official/grok)
 RUN npm install -g @xai-official/grok
-# Gemini CLI — https://github.com/google-gemini/gemini-cli
-# GEMINI_API_KEY is the secret. NO_BROWSER is not auth.
-RUN npm install -g @google/gemini-cli
-# GitHub Copilot CLI — https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli
-RUN npm install -g @github/copilot
-# Factory Droid — https://docs.factory.ai/cli/getting-started/quickstart
-RUN npm install -g droid
-# Qoder — https://docs.qoder.com/cli
-RUN npm install -g @qoder-ai/qodercli
-# CodeBuddy — https://www.codebuddy.ai/docs/cli
-RUN npm install -g @tencent-ai/codebuddy-code
-# Auggie — https://docs.augmentcode.com/cli/overview
-RUN npm install -g @augmentcode/auggie
-# Cline — https://docs.cline.bot/cline-cli
-RUN npm install -g cline
-# Kilo — https://kilo.ai/docs/cli
-RUN npm install -g @kilocode/cli
 # Codex — https://github.com/openai/codex
 RUN npm install -g @openai/codex
-# Qwen Code — https://github.com/QwenLM/qwen-code
-RUN npm install -g @qwen-code/qwen-code
-# Kimi Code — https://www.kimi.com/code/docs
-RUN npm install -g @moonshot-ai/kimi-code
-# MiniMax Code (mcode CLI) — Codync backends.rs: npm install -g @minimax-ai/code
-RUN npm install -g @minimax-ai/code
 
 # Cursor Agent — https://cursor.com/docs/cli/overview
 RUN curl -fsSL https://cursor.com/install | bash
 # Claude Code — https://docs.anthropic.com/en/docs/claude-code/setup
 RUN curl -fsSL https://claude.ai/install.sh | bash
-# OpenCode — https://opencode.ai/docs
-# The install script calls api.github.com for "latest" when VERSION is unset; use a pinned release tarball instead.
-ARG OPENCODE_VERSION=1.18.35
-RUN set -eu \
-    && arch="$(dpkg --print-architecture)" \
-    && case "$arch" in \
-         amd64) oc_arch=x64 ;; \
-         arm64) oc_arch=arm64 ;; \
-         *) echo "unsupported architecture for opencode: $arch" >&2; exit 1 ;; \
-       esac \
-    && mkdir -p /opt/codync-cli/.opencode/bin \
-    && url="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${oc_arch}.tar.gz" \
-    && tmp="$(mktemp -d)" \
-    && curl -fsSL "$url" -o "${tmp}/opencode.tar.gz" \
-    && tar -xzf "${tmp}/opencode.tar.gz" -C "${tmp}" \
-    && install -m 0755 "${tmp}/opencode" /opt/codync-cli/.opencode/bin/opencode \
-    && rm -rf "${tmp}" \
-    && /opt/codync-cli/.opencode/bin/opencode --version
-# goose — https://block.github.io/goose/docs/getting-started/installation/
-RUN curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
-# Amp — https://ampcode.com/manual
-RUN curl -fsSL https://ampcode.com/install.sh | bash
-# Junie — https://junie.jetbrains.com/docs
-RUN curl -fsSL https://junie.jetbrains.com/install.sh | bash
-# Poolside — https://docs.poolside.ai/cli
-RUN curl -fsSL https://downloads.poolside.ai/pool/install.sh | env POOL_INSTALL_ACCEPT_EULA=1 bash
-# Mistral Vibe — https://docs.mistral.ai/mistral-vibe/introduction
-RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
-# Kiro — https://kiro.dev/docs/cli
-RUN curl -fsSL https://cli.kiro.dev/install | bash
-# Devin — https://docs.devin.ai/cli
-# install.sh ends with interactive `devin setup` (browser login); skip during image build.
-RUN curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash \
-    && devin --version
-# Snowflake Cortex Code — https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli
-RUN curl -fsSL https://ai.snowflake.com/static/cc-scripts/install.sh | bash
 
 RUN set -eu \
     && chmod -R a+rX /opt/codync-cli /usr/local/bin \
@@ -157,13 +97,14 @@ RUN set -eu \
     && find /opt/codync-cli /usr/local -type d -name bin -exec chmod 0755 {} +
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+COPY scripts/install-agent-on-demand.sh /usr/local/lib/codync/install-agent-on-demand.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/lib/codync/install-agent-on-demand.sh
 
 ENV HOME=/var/lib/codync-host \
     PATH="/usr/local/bin:/opt/codync-cli/.local/bin:/opt/codync-cli/bin:/usr/share/dotnet:${PATH}"
 
 LABEL org.opencontainers.image.title="codync-host-runtime" \
-      org.opencontainers.image.description="Unofficial Codync host runtime with agent CLIs and connector runtimes" \
+      org.opencontainers.image.description="Unofficial Codync host runtime with core agent CLIs, lazy agent installs, and connector runtimes" \
       org.opencontainers.image.source="https://github.com/TheAliAbbasi/codync-host-image" \
       org.opencontainers.image.licenses="Apache-2.0"
 

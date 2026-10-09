@@ -15,9 +15,20 @@ umask 077
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-# Curl-based CLIs land under /opt/codync-cli during the image build.
+# Curl-based CLIs land under /opt/codync-cli (build or lazy install).
 if [ -d /opt/codync-cli ]; then
   extra=$(find /opt/codync-cli -type d -name bin | paste -sd: -)
+  if [ -n "$extra" ]; then
+    PATH="${extra}:${PATH}"
+    export PATH
+  fi
+fi
+
+if [ -f /usr/local/lib/codync/install-agent-on-demand.sh ]; then
+  # shellcheck disable=SC1091
+  . /usr/local/lib/codync/install-agent-on-demand.sh
+  lazy_install_agents
+  extra=$(find /opt/codync-cli -type d -name bin 2>/dev/null | paste -sd: -)
   if [ -n "$extra" ]; then
     PATH="${extra}:${PATH}"
     export PATH
