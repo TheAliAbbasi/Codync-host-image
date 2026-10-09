@@ -19,7 +19,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Installers must not write into the persisted home. A volume on
 # /var/lib/codync-host would hide anything stored there.
-ENV HOME=/opt/codync-cli
+ENV HOME=/opt/codync-cli \
+    PATH="/opt/codync-cli/.local/bin:${PATH}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
