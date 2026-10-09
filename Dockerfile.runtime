@@ -114,13 +114,13 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # OpenCode — https://opencode.ai/docs
 RUN curl -fsSL https://opencode.ai/install | bash
 # goose — https://block.github.io/goose/docs/getting-started/installation/
-RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
+RUN curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
 # Amp — https://ampcode.com/manual
 RUN curl -fsSL https://ampcode.com/install.sh | bash
 # Junie — https://junie.jetbrains.com/docs
 RUN curl -fsSL https://junie.jetbrains.com/install.sh | bash
 # Poolside — https://docs.poolside.ai/cli
-RUN curl -fsSL https://downloads.poolside.ai/pool/install.sh | bash
+RUN POOL_INSTALL_ACCEPT_EULA=1 curl -fsSL https://downloads.poolside.ai/pool/install.sh | bash
 # Mistral Vibe — https://docs.mistral.ai/mistral-vibe/introduction
 RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
 # Kiro — https://kiro.dev/docs/cli
