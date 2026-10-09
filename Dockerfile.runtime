@@ -143,7 +143,9 @@ RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
 # Kiro — https://kiro.dev/docs/cli
 RUN curl -fsSL https://cli.kiro.dev/install | bash
 # Devin — https://docs.devin.ai/cli
-RUN curl -fsSL https://cli.devin.ai/install.sh | bash
+# install.sh ends with interactive `devin setup` (browser login); skip during image build.
+RUN curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash \
+    && devin --version
 # Snowflake Cortex Code — https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli
 RUN curl -fsSL https://ai.snowflake.com/static/cc-scripts/install.sh | bash
 
