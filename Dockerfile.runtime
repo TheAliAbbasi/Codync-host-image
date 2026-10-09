@@ -136,7 +136,7 @@ RUN curl -fsSL https://ampcode.com/install.sh | bash
 # Junie — https://junie.jetbrains.com/docs
 RUN curl -fsSL https://junie.jetbrains.com/install.sh | bash
 # Poolside — https://docs.poolside.ai/cli
-RUN POOL_INSTALL_ACCEPT_EULA=1 curl -fsSL https://downloads.poolside.ai/pool/install.sh | bash
+RUN curl -fsSL https://downloads.poolside.ai/pool/install.sh | env POOL_INSTALL_ACCEPT_EULA=1 bash
 # Mistral Vibe — https://docs.mistral.ai/mistral-vibe/introduction
 RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
 # Kiro — https://kiro.dev/docs/cli
