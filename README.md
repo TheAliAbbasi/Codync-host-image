@@ -18,20 +18,24 @@ Images:
 
 Use one container. The host identity lives in the volume, so a second replica on the same volume will fight over it.
 
-Keep port **19222** off any public load balancer. The process listens on `0.0.0.0:19222`, and the local API answers loopback callers only, but the encrypted device channel is still reachable on that port. Pair over Tailscale or an SSH tunnel from your laptop (`ssh -N -L 19222:127.0.0.1:19222 user@host` then open `127.0.0.1:19222` locally).
+**Remote access (recommended):** pair the iPhone, macOS, or other desktop clients through Codync’s [Cloudflare Worker relay](https://github.com/leepokai/Codync/tree/main/cloud) — deploy that Worker to **your** Cloudflare account with Wrangler (it does not run inside this image), set `CODYNC_CLOUD_URL` on the container to the Worker’s HTTPS base URL, then pair from a client. Traffic uses the end-to-end encrypted device channel; the relay forwards ciphertext only. Clients reach the host over the cloud, not by publishing port **19222** on the internet.
+
+**Do not** expose **19222** on a public load balancer, internet-facing Kubernetes Ingress, or any address reachable from the open internet. The host listens on `0.0.0.0:19222` inside the container; the local API (`/api/*`, bearer token) answers loopback callers only, but the encrypted device channel is still reachable on that port if you publish it. For cloud relay access you can omit `-p 19222:19222` entirely. See [Running the host on a Linux server](https://github.com/leepokai/Codync/blob/main/docs/guides/linux-servers.md) and the [remote relay spec](https://github.com/leepokai/Codync/blob/main/docs/reference/remote-relay.md).
+
+Tailscale or an SSH tunnel to loopback (`ssh -N -L 19222:127.0.0.1:19222 user@host`) are optional LAN/VPN alternatives; they are not the primary way to reach a container on a cloud VM.
 
 ```bash
 docker volume create codync-host
 docker run -d --name codync-host \
   --restart unless-stopped \
-  -p 19222:19222 \
   -v codync-host:/var/lib/codync-host \
+  -e CODYNC_CLOUD_URL=https://your-worker.example.com \
   -e CURSOR_API_KEY \
   -e ANTHROPIC_API_KEY \
   ghcr.io/thealiabbasi/codync-host:runtime
 ```
 
-Publish `-p 19222:19222` only on a trusted network. Omit it when you reach the host over Tailscale or SSH port forwarding instead of exposing the port on the Docker host.
+Add `-p 19222:19222` only on a trusted private network (for example local debugging or pairing over VPC/Tailscale). Never map that port through a public-facing front end.
 
 `HOME` is `/var/lib/codync-host`. That directory is the volume, and Codync stores `~/.codync` inside it. The keyring and CLI config files live there too, so they survive a new container.
 
@@ -92,9 +96,9 @@ The runtime runs as the `codync` user, not root. The socket’s group on the hos
 DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)   # Linux; on macOS Docker Desktop use the GID from the VM docs
 docker run -d --name codync-host \
   --restart unless-stopped \
-  -p 19222:19222 \
   -v codync-host:/var/lib/codync-host \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -e CODYNC_CLOUD_URL=https://your-worker.example.com \
   --group-add "$DOCKER_GID" \
   ghcr.io/thealiabbasi/codync-host:runtime
 ```
@@ -105,7 +109,24 @@ Kubernetes: mount the socket, set `securityContext.runAsUser` to the image’s `
 
 ## `CODYNC_CLOUD_URL`
 
-Hosted, resold, or multi-tenant services must run their own Codync cloud (source in [`cloud/`](https://github.com/leepokai/Codync/tree/main/cloud)) and set `CODYNC_CLOUD_URL` to it. They may not use Codync Cloud. Personal use on your own computers can leave `CODYNC_CLOUD_URL` unset and use the cloud compiled into the host binary. `CODYNC_CLOUD=off` turns the cloud off.
+Codync’s off-LAN path is a **Cloudflare Worker** plus Durable Objects in upstream [`cloud/`](https://github.com/leepokai/Codync/tree/main/cloud) ([`cloud/README.md`](https://github.com/leepokai/Codync/blob/main/cloud/README.md): Wrangler deploy, D1, secrets). That stack runs on **Cloudflare**, not in the `codync-host:runtime` image. After deploy, point the host at your Worker:
+
+```bash
+-e CODYNC_CLOUD_URL=https://your-worker.example.com
+```
+
+(no trailing slash; the host normalizes the URL.)
+
+With the cloud URL set, the host registers with your Worker and maintains the encrypted relay channel. iPhone, macOS, and other Codync clients sign in to the same cloud, pair to this computer (QR or link), and talk to bots over that relay — same model as on a bare-metal Linux server ([linux-servers guide](https://github.com/leepokai/Codync/blob/main/docs/guides/linux-servers.md)). You do not need to publish port 19222 for that workflow.
+
+| Audience | `CODYNC_CLOUD_URL` |
+| --- | --- |
+| Personal use on your own machines | Optional. Unset uses the cloud URL compiled into the host binary (when upstream provides one). |
+| Hosted, resold, or multi-tenant services | **Required.** Deploy your own Worker from `cloud/` and set this variable. You may not use Codync Cloud. |
+
+`CODYNC_CLOUD=off` disables cloud connectivity entirely (no relay; you would need a private path such as LAN, Tailscale, or SSH forwarding if you still want remote access).
+
+For protocol and security details (signatures, relay behavior, what the Worker can and cannot see), see [remote-relay.md](https://github.com/leepokai/Codync/blob/main/docs/reference/remote-relay.md) and [environments and deployment](https://github.com/leepokai/Codync/blob/main/docs/guides/environments-and-deployment.md).
 
 ## Make the GHCR package public
 
