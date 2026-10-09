@@ -10,6 +10,8 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/codync-runtime}"
 # goose must not take the connector keyring. The image sets this too.
 export GOOSE_DISABLE_KEYRING=1
 
+umask 077
+
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
@@ -31,13 +33,39 @@ start_secret_service() {
     eval "$(dbus-launch --sh-syntax)"
     export DBUS_SESSION_BUS_ADDRESS
   fi
+  i=0
+  while [ "$i" -lt 50 ]; do
+    if dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+      /org/freedesktop/DBus org.freedesktop.DBus.ListNames >/dev/null 2>&1; then
+      break
+    fi
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if ! dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+    /org/freedesktop/DBus org.freedesktop.DBus.ListNames >/dev/null 2>&1; then
+    echo "docker-entrypoint: session D-Bus did not become ready" >&2
+    exit 1
+  fi
+
   mkdir -p "${HOME}/.local/share/keyrings"
   keyring_env=$(printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --start --components=secrets --daemonize)
+  if [ -z "$keyring_env" ]; then
+    echo "docker-entrypoint: gnome-keyring-daemon did not return environment" >&2
+    exit 1
+  fi
   eval "$keyring_env"
+  if [ -z "${GNOME_KEYRING_CONTROL:-}" ]; then
+    echo "docker-entrypoint: GNOME_KEYRING_CONTROL was not set; connectors need Secret Service" >&2
+    exit 1
+  fi
   export GNOME_KEYRING_CONTROL
   # The daemon may already hold the login keyring open. Unlock is the
   # headless path when it was created earlier and locked on restart.
-  printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock || true
+  if ! printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock; then
+    echo "docker-entrypoint: could not unlock gnome-keyring" >&2
+    exit 1
+  fi
 }
 
 init_codex() {
@@ -99,10 +127,20 @@ init_minimax() {
 }
 
 start_secret_service
-init_codex
-init_kimi
-init_qwen
-init_minimax
+
+if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${CODEX_ACCESS_TOKEN:-}" ]; then
+  init_codex
+fi
+if [ -n "${KIMI_API_KEY:-}" ]; then
+  init_kimi
+fi
+if [ -n "${DASHSCOPE_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || \
+   [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${GEMINI_API_KEY:-}" ]; then
+  init_qwen
+fi
+if [ -n "${MCODE_PROVIDER_API_KEY:-}" ]; then
+  init_minimax
+fi
 
 # Cortex needs SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, and SNOWFLAKE_PASSWORD in
 # the environment. Do not run `cortex auth login`.

@@ -5,6 +5,8 @@
 ARG HOST_IMAGE=ghcr.io/thealiabbasi/codync-host:latest
 FROM ${HOST_IMAGE}
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 USER root
 ENV DEBIAN_FRONTEND=noninteractive \
     CI=true \

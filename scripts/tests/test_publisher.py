@@ -135,6 +135,7 @@ class ExtractTest(unittest.TestCase):
             self._add(tar, "codync-host-linux-x86_64/codync-host", b"host-bin")
             self._add(tar, "codync-host-linux-x86_64/codync-screen", b"screen-bin")
             self._add(tar, "nested/dir/cua-driver", b"driver-bin")
+            self._add(tar, "nested/cua-driver.LICENSE", b"CUA license\n")
             self._add(tar, "codync-host-linux-x86_64/LICENSE", b"MIT\n")
             self._add(tar, "notes/codync-host.txt", b"not-the-binary")
             self._add(tar, "codync-host-linux-x86_64/codync-host.bak", b"backup")
@@ -144,8 +145,12 @@ class ExtractTest(unittest.TestCase):
             self.assertEqual((dest / "codync-host").read_bytes(), b"host-bin")
             self.assertEqual((dest / "codync-screen").read_bytes(), b"screen-bin")
             self.assertEqual((dest / "cua-driver").read_bytes(), b"driver-bin")
+            self.assertEqual((dest / "cua-driver.LICENSE").read_bytes(), b"CUA license\n")
             self.assertEqual((dest / "LICENSE").read_bytes(), b"MIT\n")
-            self.assertEqual(set(written), {"codync-host", "codync-screen", "cua-driver", "LICENSE"})
+            self.assertEqual(
+                set(written),
+                {"codync-host", "codync-screen", "cua-driver", "cua-driver.LICENSE", "LICENSE"},
+            )
             self.assertTrue((dest / "codync-host").stat().st_mode & 0o111)
 
     def test_missing_host_binary_fails(self) -> None:
@@ -165,6 +170,14 @@ class ExtractTest(unittest.TestCase):
         import tempfile
 
         return tempfile.TemporaryDirectory()
+
+
+class StableReleaseTest(unittest.TestCase):
+    def test_rejects_draft_and_prerelease(self) -> None:
+        for flag in ("draft", "prerelease"):
+            release = {"tag_name": "v2.11.2", flag: True, "assets": []}
+            with self.assertRaises(publisher.IneligibleRelease):
+                publisher.ensure_stable_release(release, "v2.11.2")
 
 
 class ReleaseSelectionTest(unittest.TestCase):
@@ -191,7 +204,15 @@ class ReleaseSelectionTest(unittest.TestCase):
         self.assertFalse(publisher.should_move_latest("v2.11.2", "v2.1.0"))
         self.assertFalse(publisher.should_move_latest("v2.11.2", "v2.11.2"))
         self.assertTrue(publisher.should_move_latest("v2.5.0", "v2.11.2"))
-        self.assertTrue(publisher.should_move_latest("", "v2.1.0"))
+        self.assertTrue(
+            publisher.should_move_latest("", "v2.1.0", latest_known_absent=True),
+        )
+
+    def test_empty_current_requires_latest_known_absent(self) -> None:
+        with self.assertRaises(publisher.PublishError):
+            publisher.should_move_latest("", "v2.11.2")
+        with self.assertRaises(publisher.PublishError):
+            publisher.should_move_latest("", "v2.11.2", latest_known_absent=False)
 
     def _release(self, tag: str, names: list[str], prerelease: bool = False) -> dict:
         return {

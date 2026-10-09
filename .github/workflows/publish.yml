@@ -49,6 +49,28 @@ jobs:
           ONE_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
+
+          # present | absent | fail — do not treat inspect errors as "tag missing".
+          image_tag_state() {
+            local ref="$1"
+            local err
+            err=$(mktemp)
+            if docker buildx imagetools inspect "$ref" >/dev/null 2>"$err"; then
+              rm -f "$err"
+              echo present
+              return 0
+            fi
+            if grep -qiE 'not found|manifest unknown|name unknown|failed to resolve' "$err"; then
+              rm -f "$err"
+              echo absent
+              return 0
+            fi
+            echo "imagetools inspect failed for ${ref}:" >&2
+            cat "$err" >&2
+            rm -f "$err"
+            return 1
+          }
+
           eligible_file=$(mktemp)
           python3 scripts/publisher.py list-eligible > "$eligible_file"
           mapfile -t eligible < "$eligible_file"
@@ -64,7 +86,8 @@ jobs:
             selected=("${eligible[@]}")
           else
             for tag in "${eligible[@]}"; do
-              if docker buildx imagetools inspect "${IMAGE}:${tag}" >/dev/null 2>&1; then
+              state=$(image_tag_state "${IMAGE}:${tag}")
+              if [ "$state" = present ]; then
                 echo "skip ${tag}; already on GHCR"
               else
                 selected+=("$tag")
@@ -103,10 +126,18 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.mode == 'missing'
         run: |
           set -euo pipefail
-          if docker buildx imagetools inspect "${IMAGE}:${{ matrix.tag }}" >/dev/null 2>&1; then
+          err=$(mktemp)
+          if docker buildx imagetools inspect "${IMAGE}:${{ matrix.tag }}" >/dev/null 2>"$err"; then
+            rm -f "$err"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -qiE 'not found|manifest unknown|name unknown|failed to resolve' "$err"; then
+            rm -f "$err"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "imagetools inspect failed for ${IMAGE}:${{ matrix.tag }}:" >&2
+            cat "$err" >&2
+            rm -f "$err"
+            exit 1
           fi
       - name: Verify, extract, and push
         if: steps.skip.outputs.skip != 'true'
@@ -143,12 +174,49 @@ jobs:
       - name: Point latest at the highest semver
         run: |
           set -euo pipefail
+
+          image_tag_state() {
+            local ref="$1"
+            local err
+            err=$(mktemp)
+            if docker buildx imagetools inspect "$ref" >/dev/null 2>"$err"; then
+              rm -f "$err"
+              echo present
+              return 0
+            fi
+            if grep -qiE 'not found|manifest unknown|name unknown|failed to resolve' "$err"; then
+              rm -f "$err"
+              echo absent
+              return 0
+            fi
+            echo "imagetools inspect failed for ${ref}:" >&2
+            cat "$err" >&2
+            rm -f "$err"
+            return 1
+          }
+
+          image_digest() {
+            local ref="$1"
+            local err
+            err=$(mktemp)
+            if digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>"$err"); then
+              rm -f "$err"
+              printf '%s' "$digest"
+              return 0
+            fi
+            echo "imagetools inspect failed for ${ref}:" >&2
+            cat "$err" >&2
+            rm -f "$err"
+            return 1
+          }
+
           eligible_file=$(mktemp)
           python3 scripts/publisher.py list-eligible > "$eligible_file"
           mapfile -t eligible < "$eligible_file"
           present=()
           for tag in "${eligible[@]}"; do
-            if docker buildx imagetools inspect "${IMAGE}:${tag}" >/dev/null 2>&1; then
+            state=$(image_tag_state "${IMAGE}:${tag}")
+            if [ "$state" = present ]; then
               present+=("$tag")
             fi
           done
@@ -157,18 +225,30 @@ jobs:
             exit 1
           fi
           max=$(python3 scripts/publisher.py max-semver -- "${present[@]}")
+          latest_state=$(image_tag_state "${IMAGE}:latest")
           current=""
-          if docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then
-            latest_digest=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+          latest_absent=false
+          if [ "$latest_state" = present ]; then
+            latest_digest=$(image_digest "${IMAGE}:latest")
             for tag in "${present[@]}"; do
-              digest=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{.Manifest.Digest}}')
+              digest=$(image_digest "${IMAGE}:${tag}")
               if [ "$digest" = "$latest_digest" ]; then
                 current=$tag
                 break
               fi
             done
+            if [ -z "$current" ]; then
+              echo ":latest exists on GHCR but does not match any eligible host tag digest; skip retag" >&2
+              exit 0
+            fi
+          elif [ "$latest_state" = absent ]; then
+            latest_absent=true
           fi
-          if python3 scripts/publisher.py should-move-latest --current "$current" --candidate "$max"; then
+          move_args=(--current "$current" --candidate "$max")
+          if [ "$latest_absent" = true ]; then
+            move_args+=(--latest-known-absent)
+          fi
+          if python3 scripts/publisher.py should-move-latest "${move_args[@]}"; then
             echo "retag latest -> ${max} (was ${current:-absent})"
             docker buildx imagetools create -t "${IMAGE}:latest" "${IMAGE}:${max}"
           else

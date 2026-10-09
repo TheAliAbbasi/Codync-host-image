@@ -42,7 +42,7 @@ LEGACY_TRIPLES = {
     "amd64": "x86_64-unknown-linux-gnu",
     "arm64": "aarch64-unknown-linux-gnu",
 }
-HOST_FILES = ("codync-host", "codync-screen", "cua-driver", "LICENSE")
+HOST_FILES = ("codync-host", "codync-screen", "cua-driver", "cua-driver.LICENSE", "LICENSE")
 REQUIRED_FILES = ("codync-host", "LICENSE")
 SEMVER_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)\Z")
 SHA256_RE = re.compile(r"[0-9a-fA-F]{64}\Z")
@@ -148,9 +148,9 @@ def _safe_member_name(name: str) -> bool:
 def extract_host_files(archive_bytes: bytes, dest: Path) -> dict[str, Path]:
     """Write host files into ``dest``, finding them by filename.
 
-    ``codync-host`` and ``LICENSE`` are required. ``codync-screen`` and
-    ``cua-driver`` are copied when the archive contains a regular file with
-    that name. The first match in archive order wins.
+    ``codync-host`` and ``LICENSE`` are required. ``codync-screen``,
+    ``cua-driver``, and ``cua-driver.LICENSE`` are copied when the archive
+    contains a regular file with that name. The first match in archive order wins.
     """
     dest.mkdir(parents=True, exist_ok=True)
     found: dict[str, tarfile.TarInfo] = {}
@@ -171,10 +171,10 @@ def extract_host_files(archive_bytes: bytes, dest: Path) -> dict[str, Path]:
                 raise PublishError(f"cannot read {filename} from archive")
             target = dest / filename
             target.write_bytes(extracted.read())
-            if filename != "LICENSE":
-                target.chmod(0o755)
-            else:
+            if filename == "LICENSE" or filename.endswith(".LICENSE"):
                 target.chmod(0o644)
+            else:
+                target.chmod(0o755)
             written[filename] = target
     return written
 
@@ -213,15 +213,22 @@ def max_semver(tags: Sequence[str]) -> str:
     return max(valid)[1]
 
 
-def should_move_latest(current: str, candidate: str) -> bool:
+def should_move_latest(current: str, candidate: str, *, latest_known_absent: bool = False) -> bool:
     """True when ``candidate`` is strictly newer than the tag ``latest`` already names.
 
-    An empty ``current`` means ``latest`` is absent or does not match a host
-    tag. Backfill must not point ``latest`` at an older release.
+    An empty ``current`` is only valid when ``latest_known_absent`` is true
+    (registry inspect proved ``:latest`` does not exist). If ``:latest`` exists
+    but its backing tag cannot be resolved, callers must not pass an empty
+    ``current`` — that would risk moving ``latest`` backward after a partial
+    inspect failure.
     """
     if not candidate:
         raise PublishError("candidate tag is required")
     if not current:
+        if not latest_known_absent:
+            raise PublishError(
+                "current tag is required when :latest may exist on the registry"
+            )
         return True
     current_key = parse_semver(current)
     candidate_key = parse_semver(candidate)
@@ -286,6 +293,12 @@ def fetch_release(tag: str) -> dict:
     return payload
 
 
+def ensure_stable_release(release: Mapping[str, object], tag: str) -> None:
+    """Reject draft and prerelease tags (same rules as ``list-eligible``)."""
+    if release.get("draft") or release.get("prerelease"):
+        raise IneligibleRelease(f"{tag} is a draft or prerelease")
+
+
 def _asset_urls(release: Mapping[str, object]) -> dict[str, str]:
     assets = release.get("assets") or []
     urls: dict[str, str] = {}
@@ -303,6 +316,7 @@ def _asset_urls(release: Mapping[str, object]) -> dict[str, str]:
 def stage_release(tag: str, dest: Path) -> dict[str, tuple[str, str]]:
     """Download both architectures into ``dest/<arch>/`` after checksum verification."""
     release = fetch_release(tag)
+    ensure_stable_release(release, tag)
     urls = _asset_urls(release)
     scheme = resolve_archives(tag, urls.keys())
     dest.mkdir(parents=True, exist_ok=True)
@@ -349,6 +363,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     move.add_argument("--current", default="")
     move.add_argument("--candidate", required=True)
+    move.add_argument(
+        "--latest-known-absent",
+        action="store_true",
+        help="Set when registry inspect proved :latest does not exist",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -356,6 +375,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_tags(list_eligible_tags())
         elif args.command == "check-eligible":
             release = fetch_release(args.tag)
+            ensure_stable_release(release, args.tag)
             resolve_archives(args.tag, _asset_urls(release).keys())
             print(args.tag)
         elif args.command == "stage":
@@ -367,7 +387,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "json-array":
             print(json.dumps(list(args.tags)))
         elif args.command == "should-move-latest":
-            if not should_move_latest(args.current, args.candidate):
+            if not should_move_latest(
+                args.current,
+                args.candidate,
+                latest_known_absent=args.latest_known_absent,
+            ):
                 return 1
         else:
             parser.error(f"unknown command {args.command}")

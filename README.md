@@ -18,17 +18,20 @@ Images:
 
 Use one container. The host identity lives in the volume, so a second replica on the same volume will fight over it.
 
-Keep port **19222** off any public load balancer. The process listens on `0.0.0.0:19222`, and the local API answers loopback callers only, but the encrypted device channel is still reachable on that port. Pair over Tailscale or an SSH tunnel (`ssh -L 19222:127.0.0.1:19222`).
+Keep port **19222** off any public load balancer. The process listens on `0.0.0.0:19222`, and the local API answers loopback callers only, but the encrypted device channel is still reachable on that port. Pair over Tailscale or an SSH tunnel from your laptop (`ssh -N -L 19222:127.0.0.1:19222 user@host` then open `127.0.0.1:19222` locally).
 
 ```bash
 docker volume create codync-host
 docker run -d --name codync-host \
   --restart unless-stopped \
+  -p 19222:19222 \
   -v codync-host:/var/lib/codync-host \
   -e CURSOR_API_KEY \
   -e ANTHROPIC_API_KEY \
   ghcr.io/thealiabbasi/codync-host:runtime
 ```
+
+Publish `-p 19222:19222` only on a trusted network. Omit it when you reach the host over Tailscale or SSH port forwarding instead of exposing the port on the Docker host.
 
 `HOME` is `/var/lib/codync-host`. That directory is the volume, and Codync stores `~/.codync` inside it. The keyring and CLI config files live there too, so they survive a new container.
 
@@ -81,15 +84,22 @@ The keyring password is the fixed value `codync`. That is local-to-the-volume pr
 
 ## OCI connectors and the Docker socket
 
-Connector packages install with `npx`, `uvx`, or `dnx`. Those three are in the image. OCI packages run `docker`. The image has the Docker CLI and does not run `dockerd`. Mount a daemon socket (or point at a sidecar) only if you install OCI connectors:
+Connector packages install with `npx`, `uvx`, or `dnx`. Those three are in the image. OCI packages run `docker`. The image has the Docker CLI and does not run `dockerd`. Mount a daemon socket (or point at a sidecar) only if you install OCI connectors.
+
+The runtime runs as the `codync` user, not root. The socket’s group on the host must match a supplementary group in the container (`--group-add`). Mounting `docker.sock` grants effective root on the host daemon — use only on machines you trust.
 
 ```bash
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)   # Linux; on macOS Docker Desktop use the GID from the VM docs
 docker run -d --name codync-host \
   --restart unless-stopped \
+  -p 19222:19222 \
   -v codync-host:/var/lib/codync-host \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$DOCKER_GID" \
   ghcr.io/thealiabbasi/codync-host:runtime
 ```
+
+Kubernetes: mount the socket, set `securityContext.runAsUser` to the image’s `codync` UID, and add `supplementalGroups` with the node’s `docker` (or `root`) GID for that socket.
 
 `git` and `ca-certificates` are installed because agents and `npx` need them. `codync-screen` is copied so the layout matches the host archive. Remote screen is not started.
 
