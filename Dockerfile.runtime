@@ -102,8 +102,8 @@ RUN npm install -g @openai/codex
 RUN npm install -g @qwen-code/qwen-code
 # Kimi Code — https://www.kimi.com/code/docs
 RUN npm install -g @moonshot-ai/kimi-code
-# MiniMax mcode — https://platform.minimaxi.com/docs/guides/mcode
-RUN npm install -g @minimax-ai/mcode
+# MiniMax Code (mcode CLI) — Codync backends.rs: npm install -g @minimax-ai/code
+RUN npm install -g @minimax-ai/code
 
 # Cursor Agent — https://cursor.com/docs/cli/overview
 RUN curl -fsSL https://cursor.com/install | bash
