@@ -112,7 +112,23 @@ RUN curl -fsSL https://cursor.com/install | bash
 # Claude Code — https://docs.anthropic.com/en/docs/claude-code/setup
 RUN curl -fsSL https://claude.ai/install.sh | bash
 # OpenCode — https://opencode.ai/docs
-RUN curl -fsSL https://opencode.ai/install | bash
+# The install script calls api.github.com for "latest" when VERSION is unset; use a pinned release tarball instead.
+ARG OPENCODE_VERSION=1.18.35
+RUN set -eu \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) oc_arch=x64 ;; \
+         arm64) oc_arch=arm64 ;; \
+         *) echo "unsupported architecture for opencode: $arch" >&2; exit 1 ;; \
+       esac \
+    && mkdir -p /opt/codync-cli/.opencode/bin \
+    && url="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${oc_arch}.tar.gz" \
+    && tmp="$(mktemp -d)" \
+    && curl -fsSL "$url" -o "${tmp}/opencode.tar.gz" \
+    && tar -xzf "${tmp}/opencode.tar.gz" -C "${tmp}" \
+    && install -m 0755 "${tmp}/opencode" /opt/codync-cli/.opencode/bin/opencode \
+    && rm -rf "${tmp}" \
+    && /opt/codync-cli/.opencode/bin/opencode --version
 # goose — https://block.github.io/goose/docs/getting-started/installation/
 RUN curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
 # Amp — https://ampcode.com/manual
