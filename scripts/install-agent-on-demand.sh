@@ -204,29 +204,38 @@ _install_cortex() {
   curl -fsSL https://ai.snowflake.com/static/cc-scripts/install.sh | bash
 }
 
+# Run one installer; log and continue so a failed lazy install does not block serve.
+_lazy_install_run() {
+  if ! "$1"; then
+    echo "install-agent-on-demand: $1 failed (continuing)" >&2
+  fi
+}
+
 lazy_install_agents() {
   if [ ! -d "${CODYNC_CLI_HOME}" ]; then
     return 0
   fi
-  _install_pi
-  _install_gemini
-  _install_copilot
-  _install_droid
-  _install_qoder
-  _install_codebuddy
-  _install_auggie
-  _install_cline
-  _install_kilo
-  _install_qwen
-  _install_kimi
-  _install_minimax
-  _install_opencode
-  _install_goose
-  _install_amp
-  _install_junie
-  _install_poolside
-  _install_vibe
-  _install_kiro
-  _install_devin
-  _install_cortex
+  saved_home="${HOME:-/var/lib/codync-host}"
+  _lazy_install_run _install_pi
+  _lazy_install_run _install_gemini
+  _lazy_install_run _install_copilot
+  _lazy_install_run _install_droid
+  _lazy_install_run _install_qoder
+  _lazy_install_run _install_codebuddy
+  _lazy_install_run _install_auggie
+  _lazy_install_run _install_cline
+  _lazy_install_run _install_kilo
+  _lazy_install_run _install_qwen
+  _lazy_install_run _install_kimi
+  _lazy_install_run _install_minimax
+  _lazy_install_run _install_opencode
+  _lazy_install_run _install_goose
+  _lazy_install_run _install_amp
+  _lazy_install_run _install_junie
+  _lazy_install_run _install_poolside
+  _lazy_install_run _install_vibe
+  _lazy_install_run _install_kiro
+  _lazy_install_run _install_devin
+  _lazy_install_run _install_cortex
+  export HOME="${saved_home}"
 }

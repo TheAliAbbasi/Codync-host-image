@@ -45,7 +45,7 @@ An unset variable leaves that agent unconfigured. The entrypoint does not open a
 
 The `:runtime` image ships **Claude Code**, **Cursor Agent**, **Codex**, and **Grok (xAI)** only. Every other supported CLI is downloaded on the **first container start** when the entrypoint sees the auth variables below and the binary is not already present (for example under `/opt/codync-cli` on the volume). Installs are idempotent: later restarts skip work when the tool is on `PATH`.
 
-That keeps the default image smaller. The tradeoff is **cold-start latency** and a need for **outbound network** on first use of each agent (npm, curl installers, GitHub release tarballs). Shared provider keys (for example `ANTHROPIC_API_KEY`) can trigger installs for every agent that documents that variable.
+That keeps the default image smaller. The tradeoff is **cold-start latency** and a need for **outbound network** on first use of each agent (npm, curl installers, GitHub release tarballs). Shared provider keys (for example `ANTHROPIC_API_KEY`) can trigger installs for every agent that documents that variable. A failed lazy install is logged and the entrypoint still starts **codync-host** (other agents remain available). Third-party install scripts run with the container environment visible; only set keys you intend those tools to use.
 
 | Agent | Lazy install when set (all required where listed) |
 | --- | --- |
