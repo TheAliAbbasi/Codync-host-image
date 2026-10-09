@@ -1,0 +1,150 @@
+# Unofficial runtime image. Built FROM the highest published host tag.
+# Agent CLIs are installed here. The entrypoint configures one only when its
+# secret is set and its config is missing. Google Antigravity is omitted:
+# Codync starts its ACP server, which has no documented non-browser init.
+ARG HOST_IMAGE=ghcr.io/thealiabbasi/codync-host:latest
+FROM ${HOST_IMAGE}
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive \
+    CI=true \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    GOOSE_DISABLE_KEYRING=1 \
+    DOTNET_ROOT=/usr/share/dotnet \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+# Installers must not write into the persisted home. A volume on
+# /var/lib/codync-host would hide anything stored there.
+ENV HOME=/opt/codync-cli
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        dbus \
+        dbus-x11 \
+        gnome-keyring \
+        libsecret-1-0 \
+        python3 \
+        make \
+        g++ \
+        libicu74 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/codync-cli /usr/share/dotnet \
+    && chown -R codync:codync /var/lib/codync-host
+
+# Node.js and npx — https://github.com/nodesource/distributions
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv and uvx — https://docs.astral.sh/uv/getting-started/installation/
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+
+# .NET SDK, including dnx for NuGet connector packages.
+# https://learn.microsoft.com/dotnet/core/install/linux-scripted-manual#scripted-install
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && if [ -x /usr/share/dotnet/dnx ]; then \
+         ln -sf /usr/share/dotnet/dnx /usr/local/bin/dnx; \
+       else \
+         printf '%s\n' '#!/bin/sh' 'exec /usr/share/dotnet/dotnet dnx "$@"' > /usr/local/bin/dnx; \
+         chmod 0755 /usr/local/bin/dnx; \
+       fi \
+    && chmod -R a+rX /usr/share/dotnet \
+    && rm -f /tmp/dotnet-install.sh
+
+# Docker CLI only. dockerd is not installed.
+# OCI connectors need a daemon socket mounted in from outside.
+# https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && . /etc/os-release \
+    && printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+         "$(dpkg --print-architecture)" "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v docker \
+    && ! command -v dockerd
+
+# Pi — https://github.com/earendil-works/pi
+RUN npm install -g @earendil-works/pi-coding-agent
+# Grok — https://x.ai/docs (CLI package @xai-official/grok)
+RUN npm install -g @xai-official/grok
+# Gemini CLI — https://github.com/google-gemini/gemini-cli
+# GEMINI_API_KEY is the secret. NO_BROWSER is not auth.
+RUN npm install -g @google/gemini-cli
+# GitHub Copilot CLI — https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli
+RUN npm install -g @github/copilot
+# Factory Droid — https://docs.factory.ai/cli/getting-started/quickstart
+RUN npm install -g droid
+# Qoder — https://docs.qoder.com/cli
+RUN npm install -g @qoder-ai/qodercli
+# CodeBuddy — https://www.codebuddy.ai/docs/cli
+RUN npm install -g @tencent-ai/codebuddy-code
+# Auggie — https://docs.augmentcode.com/cli/overview
+RUN npm install -g @augmentcode/auggie
+# Cline — https://docs.cline.bot/cline-cli
+RUN npm install -g cline
+# Kilo — https://kilo.ai/docs/cli
+RUN npm install -g @kilocode/cli
+# Codex — https://github.com/openai/codex
+RUN npm install -g @openai/codex
+# Qwen Code — https://github.com/QwenLM/qwen-code
+RUN npm install -g @qwen-code/qwen-code
+# Kimi Code — https://www.kimi.com/code/docs
+RUN npm install -g @moonshot-ai/kimi-code
+# MiniMax mcode — https://platform.minimaxi.com/docs/guides/mcode
+RUN npm install -g @minimax-ai/mcode
+
+# Cursor Agent — https://cursor.com/docs/cli/overview
+RUN curl -fsSL https://cursor.com/install | bash
+# Claude Code — https://docs.anthropic.com/en/docs/claude-code/setup
+RUN curl -fsSL https://claude.ai/install.sh | bash
+# OpenCode — https://opencode.ai/docs
+RUN curl -fsSL https://opencode.ai/install | bash
+# goose — https://block.github.io/goose/docs/getting-started/installation/
+RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
+# Amp — https://ampcode.com/manual
+RUN curl -fsSL https://ampcode.com/install.sh | bash
+# Junie — https://junie.jetbrains.com/docs
+RUN curl -fsSL https://junie.jetbrains.com/install.sh | bash
+# Poolside — https://docs.poolside.ai/cli
+RUN curl -fsSL https://poolside.ai/install.sh | bash
+# Mistral Vibe — https://docs.mistral.ai/mistral-vibe/introduction
+RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
+# Kiro — https://kiro.dev/docs/cli
+RUN curl -fsSL https://cli.kiro.dev/install | bash
+# Devin — https://docs.devin.ai/cli
+RUN curl -fsSL https://cli.devin.ai/install.sh | bash
+# Snowflake Cortex Code — https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli
+RUN curl -fsSL https://cli.snowflake.com/cortex/install.sh | bash
+
+RUN set -eu \
+    && chmod -R a+rX /opt/codync-cli /usr/local/bin \
+    && for modules in /usr/local/lib/node_modules /usr/lib/node_modules; do \
+         if [ -d "$modules" ]; then chmod -R a+rX "$modules"; fi; \
+       done \
+    && find /opt/codync-cli /usr/local -type d -name bin -exec chmod 0755 {} +
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
+ENV HOME=/var/lib/codync-host \
+    PATH="/usr/local/bin:/opt/codync-cli/.local/bin:/opt/codync-cli/bin:/usr/share/dotnet:${PATH}"
+
+LABEL org.opencontainers.image.title="codync-host-runtime" \
+      org.opencontainers.image.description="Unofficial Codync host runtime with agent CLIs and connector runtimes" \
+      org.opencontainers.image.source="https://github.com/TheAliAbbasi/codync-host-image" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+USER codync
+WORKDIR /var/lib/codync-host
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["serve"]

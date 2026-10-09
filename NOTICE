@@ -1,0 +1,17 @@
+This repository builds unofficial container images that redistribute the
+Codync host binary. Codync is not maintained by the publisher of these images.
+
+Codync
+Copyright 2026 Po Kai Lee
+
+Codync is licensed under the Apache License, Version 2.0.
+Releases 2.11.0 and earlier were licensed under the MIT License.
+
+The thin image copies the LICENSE file out of the upstream host archive at
+build time. Inside the image that file is /usr/local/share/codync-host/LICENSE.
+
+Codync is a trademark of its owner. See
+https://github.com/leepokai/Codync/blob/main/TRADEMARK.md
+
+Files written for this packaging repository are under the Apache License,
+Version 2.0. See the LICENSE file in this repository.

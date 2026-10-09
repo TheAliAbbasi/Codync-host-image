@@ -1,0 +1,6 @@
+.git
+**/__pycache__
+**/*.pyc
+staging
+.env
+*.tar.gz

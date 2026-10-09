@@ -1,0 +1,202 @@
+name: Publish
+
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "missing skips host tags already on GHCR; all rebuilds every eligible tag; one builds a single tag"
+        type: choice
+        default: missing
+        options:
+          - missing
+          - all
+          - one
+      tag:
+        description: "Host tag when mode is one, for example v2.11.2"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-codync-host
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/thealiabbasi/codync-host
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.out.outputs.tags }}
+      has_tags: ${{ steps.out.outputs.has_tags }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: out
+        env:
+          MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode || 'missing' }}
+          ONE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          eligible_file=$(mktemp)
+          python3 scripts/publisher.py list-eligible > "$eligible_file"
+          mapfile -t eligible < "$eligible_file"
+          selected=()
+          if [ "$MODE" = "one" ]; then
+            if [ -z "${ONE_TAG}" ]; then
+              echo "mode one requires the tag input" >&2
+              exit 1
+            fi
+            python3 scripts/publisher.py check-eligible --tag "$ONE_TAG"
+            selected+=("$ONE_TAG")
+          elif [ "$MODE" = "all" ]; then
+            selected=("${eligible[@]}")
+          else
+            for tag in "${eligible[@]}"; do
+              if docker buildx imagetools inspect "${IMAGE}:${tag}" >/dev/null 2>&1; then
+                echo "skip ${tag}; already on GHCR"
+              else
+                selected+=("$tag")
+              fi
+            done
+          fi
+          if [ "${#selected[@]}" -eq 0 ]; then
+            echo "tags=[]" >> "$GITHUB_OUTPUT"
+            echo "has_tags=false" >> "$GITHUB_OUTPUT"
+          else
+            json=$(python3 scripts/publisher.py json-array -- "${selected[@]}")
+            echo "tags=${json}" >> "$GITHUB_OUTPUT"
+            echo "has_tags=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  host:
+    needs: select
+    if: needs.select.outputs.has_tags == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        tag: ${{ fromJson(needs.select.outputs.tags) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Skip existing host tag
+        id: skip
+        if: github.event_name != 'workflow_dispatch' || inputs.mode == 'missing'
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "${IMAGE}:${{ matrix.tag }}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify, extract, and push
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          TAG: ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          context="${RUNNER_TEMP}/host-context"
+          rm -rf "$context"
+          python3 scripts/publisher.py stage --tag "$TAG" --dest "$context"
+          cp Dockerfile "$context/Dockerfile"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --file "$context/Dockerfile" \
+            --build-arg "UPSTREAM_VERSION=${TAG}" \
+            --tag "${IMAGE}:${TAG}" \
+            --provenance=false \
+            --sbom=false \
+            --push \
+            "$context"
+
+  latest:
+    needs: [select, host]
+    if: always() && needs.select.result == 'success' && needs.host.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point latest at the highest semver
+        run: |
+          set -euo pipefail
+          eligible_file=$(mktemp)
+          python3 scripts/publisher.py list-eligible > "$eligible_file"
+          mapfile -t eligible < "$eligible_file"
+          present=()
+          for tag in "${eligible[@]}"; do
+            if docker buildx imagetools inspect "${IMAGE}:${tag}" >/dev/null 2>&1; then
+              present+=("$tag")
+            fi
+          done
+          if [ "${#present[@]}" -eq 0 ]; then
+            echo "no host tags on GHCR" >&2
+            exit 1
+          fi
+          max=$(python3 scripts/publisher.py max-semver -- "${present[@]}")
+          current=""
+          if docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then
+            latest_digest=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+            for tag in "${present[@]}"; do
+              digest=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{.Manifest.Digest}}')
+              if [ "$digest" = "$latest_digest" ]; then
+                current=$tag
+                break
+              fi
+            done
+          fi
+          if python3 scripts/publisher.py should-move-latest --current "$current" --candidate "$max"; then
+            echo "retag latest -> ${max} (was ${current:-absent})"
+            docker buildx imagetools create -t "${IMAGE}:latest" "${IMAGE}:${max}"
+          else
+            echo "leave latest at ${current}; ${max} is not newer"
+          fi
+
+  runtime:
+    needs: latest
+    if: needs.latest.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build runtime from latest
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --file Dockerfile.runtime \
+            --build-arg HOST_IMAGE="${IMAGE}:latest" \
+            --tag "${IMAGE}:runtime" \
+            --provenance=false \
+            --sbom=false \
+            --push \
+            .
