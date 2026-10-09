@@ -120,7 +120,7 @@ RUN curl -fsSL https://ampcode.com/install.sh | bash
 # Junie — https://junie.jetbrains.com/docs
 RUN curl -fsSL https://junie.jetbrains.com/install.sh | bash
 # Poolside — https://docs.poolside.ai/cli
-RUN curl -fsSL https://poolside.ai/install.sh | bash
+RUN curl -fsSL https://downloads.poolside.ai/pool/install.sh | bash
 # Mistral Vibe — https://docs.mistral.ai/mistral-vibe/introduction
 RUN curl -fsSL https://mistral.ai/vibe/install.sh | bash
 # Kiro — https://kiro.dev/docs/cli
@@ -128,7 +128,7 @@ RUN curl -fsSL https://cli.kiro.dev/install | bash
 # Devin — https://docs.devin.ai/cli
 RUN curl -fsSL https://cli.devin.ai/install.sh | bash
 # Snowflake Cortex Code — https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli
-RUN curl -fsSL https://cli.snowflake.com/cortex/install.sh | bash
+RUN curl -fsSL https://ai.snowflake.com/static/cc-scripts/install.sh | bash
 
 RUN set -eu \
     && chmod -R a+rX /opt/codync-cli /usr/local/bin \
