@@ -190,6 +190,7 @@ _install_devin() {
   if agent_cli_present devin; then return 0; fi
   if [ -z "${WINDSURF_API_KEY:-}" ]; then return 0; fi
   _lazy_home
+  # sed '$d' drops install.sh's last line, `devin setup` (interactive login).
   curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash
   devin --version
 }
