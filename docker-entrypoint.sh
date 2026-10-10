@@ -60,23 +60,38 @@ start_secret_service() {
   fi
 
   mkdir -p "${HOME}/.local/share/keyrings"
-  keyring_env=$(printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --start --components=secrets --daemonize)
-  if [ -z "$keyring_env" ]; then
-    echo "docker-entrypoint: gnome-keyring-daemon did not return environment" >&2
+  # --start does not read the password on stdin. With XDG_RUNTIME_DIR set,
+  # a successful daemon also prints no environment: the control socket is
+  # the default $XDG_RUNTIME_DIR/keyring path, so GNOME_KEYRING_CONTROL is
+  # omitted. Treating that empty stdout as failure exited before serve.
+  # --unlock on this same process reads the password, creates login.keyring
+  # when the volume has none, or unlocks the file already stored there, and
+  # then serves Secret Service. A wrong password still starts the daemon
+  # but leaves the login collection locked; that exits 1 below.
+  if ! printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets --daemonize >/dev/null; then
+    echo "docker-entrypoint: gnome-keyring-daemon failed to start" >&2
     exit 1
   fi
-  eval "$keyring_env"
-  if [ -z "${GNOME_KEYRING_CONTROL:-}" ]; then
-    echo "docker-entrypoint: GNOME_KEYRING_CONTROL was not set; connectors need Secret Service" >&2
-    exit 1
-  fi
+  GNOME_KEYRING_CONTROL="${XDG_RUNTIME_DIR}/keyring"
   export GNOME_KEYRING_CONTROL
-  # --unlock unlocks login.keyring, or creates it when the volume has none
-  # yet (man gnome-keyring-daemon; unlock_or_create_login). A brand-new
-  # volume is that create path and succeeds. A later start unlocks the
-  # keyring file already stored on the volume. This still exits 1 if the
-  # daemon command itself fails.
-  if ! printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock; then
+
+  i=0
+  login_unlocked=0
+  while [ "$i" -lt 50 ]; do
+    reply=$(dbus-send --session --print-reply --dest=org.freedesktop.secrets \
+      /org/freedesktop/secrets/collection/login \
+      org.freedesktop.DBus.Properties.Get \
+      string:org.freedesktop.Secret.Collection string:Locked 2>/dev/null || true)
+    case "$reply" in
+      *'boolean false'*)
+        login_unlocked=1
+        break
+        ;;
+    esac
+    i=$((i + 1))
+    sleep 0.1
+  done
+  if [ "$login_unlocked" -ne 1 ]; then
     echo "docker-entrypoint: could not unlock gnome-keyring" >&2
     exit 1
   fi
