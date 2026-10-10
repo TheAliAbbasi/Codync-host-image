@@ -71,8 +71,11 @@ start_secret_service() {
     exit 1
   fi
   export GNOME_KEYRING_CONTROL
-  # The daemon may already hold the login keyring open. Unlock is the
-  # headless path when it was created earlier and locked on restart.
+  # --unlock unlocks login.keyring, or creates it when the volume has none
+  # yet (man gnome-keyring-daemon; unlock_or_create_login). A brand-new
+  # volume is that create path and succeeds. A later start unlocks the
+  # keyring file already stored on the volume. This still exits 1 if the
+  # daemon command itself fails.
   if ! printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock; then
     echo "docker-entrypoint: could not unlock gnome-keyring" >&2
     exit 1
