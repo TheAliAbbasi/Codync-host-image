@@ -154,13 +154,6 @@ jobs:
             rm -f "$err"
             exit 1
           fi
-      # Temporary: free-tier hosted runners often ENOSPC on multi-arch buildx builds.
-      - name: Free disk space
-        if: steps.skip.outputs.skip != 'true'
-        uses: jlumbroso/free-disk-space@main
-      - name: Disk space after cleanup
-        if: steps.skip.outputs.skip != 'true'
-        run: df -h
       - name: Verify, extract, and push
         if: steps.skip.outputs.skip != 'true'
         env:
@@ -302,11 +295,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Temporary: free-tier hosted runners often ENOSPC on multi-arch buildx builds.
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-      - name: Disk space after cleanup
-        run: df -h
       - name: Build runtime from latest
         run: |
           set -euo pipefail
